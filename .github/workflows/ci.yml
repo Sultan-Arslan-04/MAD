@@ -1,4 +1,4 @@
-name: Android CI
+name: Android Build
 
 on:
   push:
@@ -17,12 +17,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: 18
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build Android APK
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build APK
         run: |
           cd android
           ./gradlew assembleDebug
