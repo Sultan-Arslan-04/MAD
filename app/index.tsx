@@ -1,81 +1,76 @@
 import { useEffect, useState } from "react";
-import { View, Text, TextInput, Button, FlatList, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TextInput, Button, FlatList, TouchableOpacity, StyleSheet, Platform } from "react-native";
 import * as SQLite from "expo-sqlite";
 import * as Notifications from "expo-notifications";
 
-// Open database
-const db = SQLite.openDatabase("todos.db");
+const db = SQLite.openDatabaseSync("todos.db");
 
 export default function App() {
   const [task, setTask] = useState("");
   const [todos, setTodos] = useState<any[]>([]);
   const [filter, setFilter] = useState("ALL");
 
-  // Create table
   useEffect(() => {
-    db.transaction(tx => {
-      tx.executeSql(
-        "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, completed INTEGER);"
-      );
-    });
-    fetchTodos();
-    requestPermission();
+    createTable();
+    loadTodos();
+    setupNotifications();
   }, []);
 
-  // Notification permission
-  const requestPermission = async () => {
-    await Notifications.requestPermissionsAsync();
+  const createTable = () => {
+    db.execSync(
+      "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, completed INTEGER);"
+    );
   };
 
-  // Fetch todos
-  const fetchTodos = () => {
-    db.transaction(tx => {
-      tx.executeSql("SELECT * FROM todos", [], (_, result) => {
-        setTodos(result.rows._array);
-      });
-    });
+  const loadTodos = () => {
+    const result = db.getAllSync("SELECT * FROM todos");
+    setTodos(result);
   };
 
-  // Add todo
   const addTodo = () => {
-    if (!task) return;
+    if (!task.trim()) return;
 
-    db.transaction(tx => {
-      tx.executeSql("INSERT INTO todos (title, completed) VALUES (?, ?)", [
-        task,
-        0,
-      ]);
-    });
+    db.runSync("INSERT INTO todos (title, completed) VALUES (?, ?)", [
+      task,
+      0,
+    ]);
 
     scheduleReminder(task);
     setTask("");
-    fetchTodos();
+    loadTodos();
   };
 
-  // Toggle complete
   const toggleTodo = (id: number, completed: number) => {
-    db.transaction(tx => {
-      tx.executeSql("UPDATE todos SET completed=? WHERE id=?", [
-        completed ? 0 : 1,
-        id,
-      ]);
-    });
-    fetchTodos();
+    db.runSync("UPDATE todos SET completed=? WHERE id=?", [
+      completed ? 0 : 1,
+      id,
+    ]);
+    loadTodos();
   };
 
-  // Reminder
-  const scheduleReminder = async (title: string) => {
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Todo Reminder",
-        body: title,
-        sound: true,
-      },
-      trigger: { seconds: 5 },
-    });
+  const setupNotifications = async () => {
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "default",
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
   };
 
-  // Filter logic
+const scheduleReminder = async (title: string) => {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Todo Reminder",
+      body: title,
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 5,
+      repeats: false,
+    },
+  });
+};
+
   const filteredTodos = todos.filter(todo => {
     if (filter === "COMPLETED") return todo.completed === 1;
     if (filter === "PENDING") return todo.completed === 0;
@@ -103,15 +98,10 @@ export default function App() {
 
       <FlatList
         data={filteredTodos}
-        keyExtractor={item => item.id.toString()}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <TouchableOpacity onPress={() => toggleTodo(item.id, item.completed)}>
-            <Text
-              style={[
-                styles.todo,
-                item.completed && styles.completed,
-              ]}
-            >
+            <Text style={[styles.todo, item.completed && styles.completed]}>
               {item.title}
             </Text>
           </TouchableOpacity>
