@@ -1,121 +1,206 @@
 import { useEffect, useState } from "react";
-import { View, Text, TextInput, Button, FlatList, TouchableOpacity, StyleSheet, Platform } from "react-native";
-import * as SQLite from "expo-sqlite";
-import * as Notifications from "expo-notifications";
+import {
+  View,
+  Text,
+  TextInput,
+  Button,
+  FlatList,
+  StyleSheet,
+  Platform,
+  Alert,
+} from "react-native";
 
-const db = SQLite.openDatabaseSync("todos.db");
+import * as Notifications from "expo-notifications";
+import { createClient } from "@supabase/supabase-js";
+
+/* ---------------- SUPABASE SETUP ---------------- */
+const supabaseUrl = "https://gulthrunoifhjckttikl.supabase.co";
+const supabaseAnonKey = "sb_publishable_xQLv9u4zNDA-4D7y_M-qRg_QMyeVtAU";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+/* ---------------- NOTIFICATION HANDLER ---------------- */
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 export default function App() {
   const [task, setTask] = useState("");
+  const [time, setTime] = useState("");
   const [todos, setTodos] = useState<any[]>([]);
-  const [filter, setFilter] = useState("ALL");
+
+  /* ---------------- FETCH TODOS ---------------- */
+  const fetchTodos = async () => {
+    const { data } = await supabase
+      .from("todos")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (data) setTodos(data);
+  };
 
   useEffect(() => {
-    createTable();
-    loadTodos();
-    setupNotifications();
+    fetchTodos();
+    Notifications.requestPermissionsAsync();
   }, []);
 
-  const createTable = () => {
-    db.execSync(
-      "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, completed INTEGER);"
-    );
-  };
+  /* ---------------- ADD TODO ---------------- */
+  const addTodo = async () => {
+    if (!task || !time) {
+      Alert.alert("Error", "Please enter task and time in YYYY-MM-DD HH:MM");
+      return;
+    }
 
-  const loadTodos = () => {
-    const result = db.getAllSync("SELECT * FROM todos");
-    setTodos(result);
-  };
+    const date = new Date(time);
 
-  const addTodo = () => {
-    if (!task.trim()) return;
+    await supabase.from("todos").insert({
+      title: task,
+      completed: false,
+      due_time: date.toISOString(),
+    });
 
-    db.runSync("INSERT INTO todos (title, completed) VALUES (?, ?)", [
-      task,
-      0,
-    ]);
+    // 🔔 Notifications only on APK
+    if (Platform.OS !== "web") {
+      const seconds = Math.max(Math.floor((date.getTime() - Date.now()) / 1000), 1);
 
-    scheduleReminder(task);
-    setTask("");
-    loadTodos();
-  };
-
-  const toggleTodo = (id: number, completed: number) => {
-    db.runSync("UPDATE todos SET completed=? WHERE id=?", [
-      completed ? 0 : 1,
-      id,
-    ]);
-    loadTodos();
-  };
-
-  const setupNotifications = async () => {
-    if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("default", {
-        name: "default",
-        importance: Notifications.AndroidImportance.DEFAULT,
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Todo Reminder",
+          body: task,
+        },
+        trigger: {
+          type: "timeInterval",
+          seconds,
+          repeats: false,
+        } as Notifications.TimeIntervalTriggerInput,
       });
     }
+
+    setTask("");
+    setTime("");
+    fetchTodos();
   };
 
-const scheduleReminder = async (title: string) => {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Todo Reminder",
-      body: title,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: 5,
-      repeats: false,
-    },
-  });
-};
+  /* ---------------- TOGGLE COMPLETE ---------------- */
+  const toggleTodo = async (id: number, completed: boolean) => {
+    await supabase.from("todos").update({ completed: !completed }).eq("id", id);
+    fetchTodos();
+  };
 
-  const filteredTodos = todos.filter(todo => {
-    if (filter === "COMPLETED") return todo.completed === 1;
-    if (filter === "PENDING") return todo.completed === 0;
-    return true;
-  });
+  /* ---------------- DELETE TODO ---------------- */
+  const deleteTodo = async (id: number) => {
+    await supabase.from("todos").delete().eq("id", id);
+    fetchTodos();
+  };
 
+  /* ---------------- TIME OVER CHECK ---------------- */
+  const isTimeOver = (due: string) => {
+    return new Date(due).getTime() < Date.now();
+  };
+
+  /* ---------------- UI ---------------- */
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Todo List</Text>
+      <Text style={styles.heading}>Todo App</Text>
 
       <TextInput
         style={styles.input}
-        placeholder="Enter task"
+        placeholder="Task name"
         value={task}
         onChangeText={setTask}
       />
 
-      <Button title="Add Todo" onPress={addTodo} />
+      <TextInput
+        style={styles.input}
+        placeholder="YYYY-MM-DD HH:MM"
+        value={time}
+        onChangeText={setTime}
+      />
 
-      <View style={styles.filters}>
-        <Button title="All" onPress={() => setFilter("ALL")} />
-        <Button title="Completed" onPress={() => setFilter("COMPLETED")} />
-        <Button title="Pending" onPress={() => setFilter("PENDING")} />
-      </View>
+      <Button title="Add Task" onPress={addTodo} />
 
       <FlatList
-        data={filteredTodos}
+        data={todos}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => toggleTodo(item.id, item.completed)}>
-            <Text style={[styles.todo, item.completed && styles.completed]}>
-              {item.title}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.todo}>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.text,
+                  item.completed && styles.completed,
+                ]}
+              >
+                {item.title}
+              </Text>
+
+              <Text style={styles.time}>
+                ⏰ {new Date(item.due_time).toLocaleString()}
+              </Text>
+
+              {!item.completed && isTimeOver(item.due_time) && (
+                <Text style={styles.over}>⛔ Time Over</Text>
+              )}
+            </View>
+
+            <Button
+              title={item.completed ? "Undo" : "Done"}
+              onPress={() => toggleTodo(item.id, item.completed)}
+            />
+
+            <Button
+              title="Del"
+              color="red"
+              onPress={() => deleteTodo(item.id)}
+            />
+          </View>
         )}
       />
     </View>
   );
 }
 
+/* ---------------- STYLES ---------------- */
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, marginTop: 40 },
-  heading: { fontSize: 24, marginBottom: 10, textAlign: "center" },
-  input: { borderWidth: 1, padding: 8, marginBottom: 10 },
-  todo: { fontSize: 18, padding: 10 },
-  completed: { textDecorationLine: "line-through", color: "gray" },
-  filters: { flexDirection: "row", justifyContent: "space-around", marginVertical: 10 },
+  container: {
+    padding: 20,
+    marginTop: 40,
+  },
+  heading: {
+    fontSize: 24,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  input: {
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 8,
+    borderRadius: 5,
+  },
+  todo: {
+    flexDirection: "row",
+    marginVertical: 8,
+    alignItems: "center",
+  },
+  text: {
+    fontSize: 16,
+  },
+  completed: {
+    textDecorationLine: "line-through",
+    color: "gray",
+  },
+  time: {
+    fontSize: 12,
+    color: "gray",
+  },
+  over: {
+    color: "red",
+    fontWeight: "bold",
+  },
 });
