@@ -1,24 +1,25 @@
 import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
+  Alert,
   Button,
   FlatList,
-  StyleSheet,
   Platform,
-  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
-import * as Notifications from "expo-notifications";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { createClient } from "@supabase/supabase-js";
+import * as Notifications from "expo-notifications";
 
-/* ---------------- SUPABASE SETUP ---------------- */
-const supabaseUrl = "https://gulthrunoifhjckttikl.supabase.co";
-const supabaseAnonKey = "sb_publishable_xQLv9u4zNDA-4D7y_M-qRg_QMyeVtAU";
+/* ---------- SUPABASE SETUP ---------- */
+const supabaseUrl = "https://gulthrunoifhjckttikl.supabase.co";        // add your Supabase URL
+const supabaseAnonKey = "sb_publishable_xQLv9u4zNDA-4D7y_M-qRg_QMyeVtAU";   // add your Supabase anon key
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-/* ---------------- NOTIFICATION HANDLER ---------------- */
+/* ---------- NOTIFICATION HANDLER ---------- */
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -31,10 +32,13 @@ Notifications.setNotificationHandler({
 
 export default function App() {
   const [task, setTask] = useState("");
-  const [time, setTime] = useState("");
+  const [date, setDate] = useState<Date | null>(null);
   const [todos, setTodos] = useState<any[]>([]);
 
-  /* ---------------- FETCH TODOS ---------------- */
+  const [showDate, setShowDate] = useState(false);
+  const [showTime, setShowTime] = useState(false);
+
+  /* ---------- FETCH TODOS ---------- */
   const fetchTodos = async () => {
     const { data } = await supabase
       .from("todos")
@@ -49,14 +53,32 @@ export default function App() {
     Notifications.requestPermissionsAsync();
   }, []);
 
-  /* ---------------- ADD TODO ---------------- */
+  /* ---------- DATE PICKER ---------- */
+  const onDateChange = (_: any, selectedDate?: Date) => {
+    setShowDate(false);
+    if (selectedDate) {
+      setDate(selectedDate);
+      setShowTime(true);
+    }
+  };
+
+  /* ---------- TIME PICKER ---------- */
+  const onTimeChange = (_: any, selectedTime?: Date) => {
+    setShowTime(false);
+    if (selectedTime && date) {
+      const finalDate = new Date(date);
+      finalDate.setHours(selectedTime.getHours());
+      finalDate.setMinutes(selectedTime.getMinutes());
+      setDate(finalDate);
+    }
+  };
+
+  /* ---------- ADD TODO ---------- */
   const addTodo = async () => {
-    if (!task || !time) {
-      Alert.alert("Error", "Please enter task and time in YYYY-MM-DD HH:MM");
+    if (!task || !date) {
+      Alert.alert("Error", "Enter task and select date & time");
       return;
     }
-
-    const date = new Date(time);
 
     await supabase.from("todos").insert({
       title: task,
@@ -64,9 +86,11 @@ export default function App() {
       due_time: date.toISOString(),
     });
 
-    // 🔔 Notifications only on APK
     if (Platform.OS !== "web") {
-      const seconds = Math.max(Math.floor((date.getTime() - Date.now()) / 1000), 1);
+      const seconds = Math.max(
+        Math.floor((date.getTime() - Date.now()) / 1000),
+        1
+      );
 
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -79,31 +103,32 @@ export default function App() {
           repeats: false,
         } as Notifications.TimeIntervalTriggerInput,
       });
+
     }
 
     setTask("");
-    setTime("");
+    setDate(null);
     fetchTodos();
   };
 
-  /* ---------------- TOGGLE COMPLETE ---------------- */
   const toggleTodo = async (id: number, completed: boolean) => {
-    await supabase.from("todos").update({ completed: !completed }).eq("id", id);
+    await supabase
+      .from("todos")
+      .update({ completed: !completed })
+      .eq("id", id);
+
     fetchTodos();
   };
 
-  /* ---------------- DELETE TODO ---------------- */
   const deleteTodo = async (id: number) => {
     await supabase.from("todos").delete().eq("id", id);
     fetchTodos();
   };
 
-  /* ---------------- TIME OVER CHECK ---------------- */
-  const isTimeOver = (due: string) => {
-    return new Date(due).getTime() < Date.now();
-  };
+  const isTimeOver = (due: string) =>
+    new Date(due).getTime() < Date.now();
 
-  /* ---------------- UI ---------------- */
+  /* ---------- UI ---------- */
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Todo App</Text>
@@ -115,18 +140,35 @@ export default function App() {
         onChangeText={setTask}
       />
 
-      <TextInput
-        style={styles.input}
-        placeholder="YYYY-MM-DD HH:MM"
-        value={time}
-        onChangeText={setTime}
+      <Button
+        title={date ? date.toLocaleString() : "Select Date & Time"}
+        onPress={() => setShowDate(true)}
       />
 
-      <Button title="Add Task" onPress={addTodo} />
+      <View style={{ marginVertical: 8 }}>
+        <Button title="Add Task" onPress={addTodo} />
+      </View>
+
+      {showDate && (
+        <DateTimePicker
+          value={date || new Date()}
+          mode="date"
+          onChange={onDateChange}
+        />
+      )}
+
+      {showTime && (
+        <DateTimePicker
+          value={date || new Date()}
+          mode="time"
+          onChange={onTimeChange}
+        />
+      )}
 
       <FlatList
         data={todos}
         keyExtractor={(item) => item.id.toString()}
+        contentContainerStyle={{ paddingBottom: 100 }}
         renderItem={({ item }) => (
           <View style={styles.todo}>
             <View style={{ flex: 1 }}>
@@ -150,7 +192,9 @@ export default function App() {
 
             <Button
               title={item.completed ? "Undo" : "Done"}
-              onPress={() => toggleTodo(item.id, item.completed)}
+              onPress={() =>
+                toggleTodo(item.id, item.completed)
+              }
             />
 
             <Button
@@ -165,17 +209,18 @@ export default function App() {
   );
 }
 
-/* ---------------- STYLES ---------------- */
+/* ---------- STYLES ---------- */
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     padding: 20,
     marginTop: 40,
   },
   heading: {
     fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 10,
     textAlign: "center",
+    marginBottom: 10,
   },
   input: {
     borderWidth: 1,
